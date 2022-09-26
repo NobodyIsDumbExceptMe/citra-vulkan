@@ -21,6 +21,7 @@ constexpr u32 MAX_VERTEX_ATTRIBUTES = 16;
 constexpr u32 MAX_VERTEX_BINDINGS = 16;
 constexpr u32 MAX_DESCRIPTORS = 8;
 constexpr u32 MAX_DESCRIPTOR_SETS = 6;
+constexpr u32 DESCRIPTOR_BANK_SIZE = 32;
 
 enum class AttribType : u32 {
     Float = 0,
@@ -247,7 +248,9 @@ private:
     // Current data for the descriptor sets
     std::array<DescriptorSetData, MAX_DESCRIPTOR_SETS> update_data{};
     std::array<bool, MAX_DESCRIPTOR_SETS> descriptor_dirty{};
-    std::array<vk::DescriptorSet, MAX_DESCRIPTOR_SETS> descriptor_sets;
+    std::array<vk::DescriptorSet, MAX_DESCRIPTOR_SETS> descriptor_sets{};
+    std::array<std::vector<vk::DescriptorSet>, MAX_DESCRIPTOR_SETS> descriptor_bank;
+    std::unordered_map<u64, vk::DescriptorSet, Common::IdentityHash<u64>> descriptor_cache;
 
     // Bound shader modules
     enum ProgramType : u32 {

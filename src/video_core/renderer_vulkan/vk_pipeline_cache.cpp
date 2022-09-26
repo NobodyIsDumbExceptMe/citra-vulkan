@@ -306,6 +306,10 @@ void PipelineCache::SetScissor(s32 x, s32 y, u32 width, u32 height) {
 void PipelineCache::MarkDescriptorSetsDirty() {
     descriptor_dirty.fill(true);
     current_pipeline = VK_NULL_HANDLE;
+    descriptor_cache.clear();
+    for (auto& bank : descriptor_bank) {
+        bank.clear();
+    }
 }
 
 void PipelineCache::ApplyDynamic(const PipelineInfo& info) {
@@ -564,22 +568,35 @@ vk::Pipeline PipelineCache::BuildPipeline(const PipelineInfo& info) {
     return VK_NULL_HANDLE;
 }
 
-static_assert(sizeof(vk::DescriptorBufferInfo) == sizeof(VkDescriptorBufferInfo));
-
 void PipelineCache::BindDescriptorSets() {
+    static std::array<vk::DescriptorSetLayout, DESCRIPTOR_BANK_SIZE> layouts{};
     vk::Device device = instance.GetDevice();
+
     for (u32 i = 0; i < RASTERIZER_SET_COUNT; i++) {
-        if (descriptor_dirty[i] || !descriptor_sets[i]) {
-            const vk::DescriptorSetAllocateInfo alloc_info = {
-                .descriptorPool = scheduler.GetDescriptorPool(),
-                .descriptorSetCount = 1,
-                .pSetLayouts = &descriptor_set_layouts[i]
-            };
+        if (descriptor_dirty[i]) {
+            const std::size_t data_size = RASTERIZER_SETS[i].binding_count * sizeof(DescriptorData);
+            const u64 data_hash = Common::ComputeHash64(update_data[i].data(), data_size);
 
-            vk::DescriptorSet set = device.allocateDescriptorSets(alloc_info)[0];
-            device.updateDescriptorSetWithTemplate(set, update_templates[i], update_data[i][0]);
+            auto [it, new_descriptor_set] = descriptor_cache.try_emplace(data_hash, vk::DescriptorSet{});
+            if (new_descriptor_set) {
+                if (descriptor_bank[i].empty()) {
+                    layouts.fill(descriptor_set_layouts[i]);
 
-            descriptor_sets[i] = set;
+                    const vk::DescriptorSetAllocateInfo alloc_info = {
+                        .descriptorPool = scheduler.GetDescriptorPool(),
+                        .descriptorSetCount = DESCRIPTOR_BANK_SIZE,
+                        .pSetLayouts = layouts.data()
+                    };
+
+                    descriptor_bank[i] = device.allocateDescriptorSets(alloc_info);
+                }
+
+                it->second = descriptor_bank[i].back();
+                device.updateDescriptorSetWithTemplate(it->second, update_templates[i], update_data[i][0]);
+                descriptor_bank[i].pop_back();
+            }
+
+            descriptor_sets[i] = it->second;
             descriptor_dirty[i] = false;
         }
     }
